@@ -13,6 +13,11 @@
 
 -  Bug in rooftop snipers, Idk issue but its like scaled on screen. Changing screen window size or full screening fixes it lol.
 
+9/14/26
+
+-  Name changed to more the evermore creative "foxthree"
+-  maybe you can figure it out..
+
 ## Upcoming
 
 -   Proxy will be fixed i swear
