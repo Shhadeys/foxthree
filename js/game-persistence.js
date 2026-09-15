@@ -2,7 +2,7 @@
  * Auto-persistence safety net for game saves.
  *
  * Games loaded into #page-loader iframe are same-origin, so their save data
- * already lives in this page's localStorage right alongside Epsilon's own
+ * already lives in this page's localStorage right alongside foxthree's own
  * settings -- nothing special has to be done to make progress "count".
  * What this file adds is a background copy of that data (kept in IndexedDB,
  * not cookies -- a single game save can easily blow past the ~4KB-per-cookie

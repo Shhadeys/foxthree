@@ -90,6 +90,21 @@
         return ts && typeof ts.toMillis === 'function' ? ts.toMillis() : 0;
     }
 
+    function formatMessageTimestamp(ts) {
+        const date = new Date(ts);
+        const now = new Date();
+        const time = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        if (date.toDateString() === now.toDateString()) return time;
+
+        const yesterday = new Date(now);
+        yesterday.setDate(now.getDate() - 1);
+        if (date.toDateString() === yesterday.toDateString()) return 'Yesterday ' + time;
+
+        const sameYear = date.getFullYear() === now.getFullYear();
+        const dateStr = date.toLocaleDateString([], sameYear ? { month: 'short', day: 'numeric' } : { month: 'short', day: 'numeric', year: 'numeric' });
+        return dateStr + ' ' + time;
+    }
+
     function lastReadKey(threadKey) {
         return 'chatLastRead:' + state.uid + ':' + threadKey;
     }
@@ -243,6 +258,8 @@
             state.unsubMessages();
             state.unsubMessages = null;
         }
+        clearPending();
+        renderedMessageIds = [];
         const messages = $('chatMessages');
         if (messages) messages.innerHTML = '';
     }
@@ -307,9 +324,23 @@
 
     // ---------- Messages ----------
 
-    function appendMessageEl(container, { name, text, ts, mine }) {
+    // Snapshots re-fire the whole doc list on every new message; tracking which ids we've
+    // already rendered lets us only append what's new instead of wiping and replaying the
+    // entrance animation on the entire thread each time (that full-rebuild was the "jump").
+    let renderedMessageIds = [];
+    // Locally-echoed messages shown the instant Send is pressed, before Firestore confirms
+    // them -- removed as soon as the next snapshot comes back (which will include them for
+    // real). Purely visual, never part of renderedMessageIds.
+    let pendingEls = [];
+
+    function clearPending() {
+        pendingEls.forEach((el) => el.remove());
+        pendingEls = [];
+    }
+
+    function appendMessageEl(container, { name, text, ts, mine, pending }) {
         const item = document.createElement('div');
-        item.className = 'chat-message' + (mine ? ' own' : '');
+        item.className = 'chat-message' + (mine ? ' own' : '') + (pending ? ' pending' : '');
 
         const meta = document.createElement('div');
         meta.className = 'chat-message-meta';
@@ -321,7 +352,7 @@
 
         if (ts) {
             const timeEl = document.createElement('span');
-            timeEl.textContent = new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+            timeEl.textContent = formatMessageTimestamp(ts);
             meta.appendChild(timeEl);
         }
 
@@ -332,23 +363,55 @@
         item.appendChild(meta);
         item.appendChild(textEl);
         container.appendChild(item);
+        return item;
+    }
+
+    function appendPendingMessage(text) {
+        const container = $('chatMessages');
+        if (!container) return null;
+        const el = appendMessageEl(container, { name: state.username, text, ts: Date.now(), mine: true, pending: true });
+        container.scrollTo({ top: container.scrollHeight, behavior: 'smooth' });
+        return el;
     }
 
     function renderMessageDocs(docs) {
         const container = $('chatMessages');
         if (!container) return;
-        container.innerHTML = '';
-        docs.forEach((d) => {
-            const data = d.data();
-            if (!data || typeof data.text !== 'string') return;
+
+        // The real snapshot is authoritative -- any locally-echoed message either shows up
+        // in it now or failed, so the optimistic placeholder has nothing left to do.
+        clearPending();
+
+        const newIds = docs.map((d) => d.id);
+        const isAppendOnly =
+            renderedMessageIds.length > 0 &&
+            newIds.length >= renderedMessageIds.length &&
+            renderedMessageIds.every((id, i) => newIds[i] === id);
+
+        if (!isAppendOnly) {
+            container.innerHTML = '';
+            renderedMessageIds = [];
+        }
+
+        let appended = false;
+        for (let i = renderedMessageIds.length; i < docs.length; i++) {
+            const data = docs[i].data();
+            if (!data || typeof data.text !== 'string') continue;
             appendMessageEl(container, {
                 name: data.name,
                 text: data.text,
                 ts: data.ts && typeof data.ts.toMillis === 'function' ? data.ts.toMillis() : null,
                 mine: data.uid === state.uid,
             });
-        });
-        container.scrollTop = container.scrollHeight;
+            appended = true;
+        }
+        renderedMessageIds = newIds;
+
+        if (isAppendOnly && appended) {
+            container.scrollTo({ top: container.scrollHeight, behavior: 'smooth' });
+        } else {
+            container.scrollTop = container.scrollHeight;
+        }
 
         // Viewing this thread counts as reading it -- refresh the read marker and
         // let the sidebar/global badges re-evaluate now that it's up to date.
@@ -375,6 +438,9 @@
         if (!text || !state.uid) return;
 
         state.lastSendAt = now;
+        const pendingEl = appendPendingMessage(text);
+        if (pendingEl) pendingEls.push(pendingEl);
+
         const payload = {
             uid: state.uid,
             name: state.username,
@@ -400,6 +466,7 @@
             }
         } catch (err) {
             console.error('Failed to send message', err);
+            if (pendingEl) pendingEl.classList.add('failed');
         }
     }
 

@@ -817,9 +817,8 @@ function saveColorChanges() {
         }
     });
 
-    // Re-initialize particles and title gradient immediately
+    // Re-initialize particles immediately
     if (typeof initParticles === 'function') initParticles();
-    if (typeof changeTitleColor === 'function') changeTitleColor();
 
     alert('Colors saved!');
 }
