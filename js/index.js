@@ -263,13 +263,31 @@ function initGameScaler(iframeEl) {
             return false; // cross-origin (e.g. proxy), nothing we can do
         }
 
-        const canvases = Array.from(doc.querySelectorAll('canvas'));
+        // some engines (texture atlases, offscreen buffers) keep extra <canvas> elements
+        // around that are never actually displayed; ignore those when picking the "main" one
+        const canvases = Array.from(doc.querySelectorAll('canvas')).filter((c) => {
+            if (!c.width || !c.height) return false;
+            const style = win.getComputedStyle(c);
+            return style.display !== 'none' && style.visibility !== 'hidden';
+        });
         if (!canvases.length) return false;
 
         const canvas = canvases.reduce((a, b) => (a.width * a.height >= b.width * b.height ? a : b));
         if (!canvas.width || !canvas.height) return false;
 
+        // Some engines size their canvas via inline style themselves before we ever get a
+        // chance to look at it (e.g. Construct 2 runs its own initial setSize() during startup,
+        // well before this iframe's 'load' event even fires). If we blindly apply our own fit
+        // on top of that, we clobber an already-correct layout - and since those engines often
+        // only re-touch the style on an actual resize, our wrong overwrite then sits there
+        // until the user resizes the window and gives the game a reason to write again. So
+        // check up front: if the canvas already has inline width/height styling, someone else
+        // is already managing it - don't touch it at all, from the very first frame.
+        let handedOff = !!(canvas.style.width || canvas.style.height);
+        let lastAppliedCssText = null; // our own last write, so we can tell it apart from the game's
+
         const applyFit = () => {
+            if (handedOff) return;
             const vw = win.innerWidth;
             const vh = win.innerHeight;
             if (!vw || !vh) return;
@@ -280,13 +298,16 @@ function initGameScaler(iframeEl) {
                 canvas.style.removeProperty('position');
                 canvas.style.removeProperty('left');
                 canvas.style.removeProperty('top');
+                canvas.style.removeProperty('transform');
                 canvas.style.removeProperty('width');
                 canvas.style.removeProperty('height');
+                lastAppliedCssText = canvas.style.cssText;
                 return;
             }
 
             const cw = canvas.width;
             const ch = canvas.height;
+            if (!cw || !ch) return;
             const scale = Math.min(vw / cw, vh / ch);
             const w = Math.floor(cw * scale);
             const h = Math.floor(ch * scale);
@@ -296,15 +317,39 @@ function initGameScaler(iframeEl) {
             doc.body.style.overflow = 'hidden';
             if (!doc.body.style.background) doc.body.style.background = '#000';
 
+            // center with a percentage + transform instead of computed left/top pixels, so that
+            // if we ever get a chance to write again the canvas stays centered no matter what
+            // size it was left at.
             canvas.style.position = 'absolute';
-            canvas.style.left = Math.floor((vw - w) / 2) + 'px';
-            canvas.style.top = Math.floor((vh - h) / 2) + 'px';
+            canvas.style.left = '50%';
+            canvas.style.top = '50%';
+            canvas.style.transform = 'translate(-50%, -50%)';
             canvas.style.width = w + 'px';
             canvas.style.height = h + 'px';
+            lastAppliedCssText = canvas.style.cssText;
         };
+
+        // Some engines (e.g. Construct 2's "scale inner/outer" fullscreen modes) resize their
+        // own canvas via canvas.style on every window resize - independently of us, and not
+        // necessarily in sync with our own 'resize' handler. Fighting that with a periodic
+        // re-fit causes exactly the bug this was meant to solve: it can look right while
+        // actively resizing (whoever wrote last wins each frame) and then snap back to a stale,
+        // wrong size the moment resizing stops and our side happens to write last. So instead:
+        // the first time we see canvas.style change to something we did NOT just write
+        // ourselves, that means the game is managing its own sizing - stop touching it for good
+        // and leave whatever the game just set alone.
+        const observer = new win.MutationObserver(() => {
+            if (handedOff) return;
+            if (canvas.style.cssText === lastAppliedCssText) return; // our own write, ignore
+            handedOff = true;
+            observer.disconnect();
+            win.removeEventListener('resize', applyFit);
+        });
+        observer.observe(canvas, { attributes: true, attributeFilter: ['style'] });
 
         applyFit();
         win.addEventListener('resize', applyFit);
+
         return true;
     }
 
