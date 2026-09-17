@@ -33,10 +33,12 @@ fetch('./config.jsonc')
         themes = json['themes'];
         config = json['config'];
 
+        const GAMES_BASE_URL = 'https://games.foxthree.org/games/';
+
         let gamesList = $('#gamesList');
         for (game in games) {
             gamesList.append(
-                `<li url="games/${games[game]['path']}" ${
+                `<li url="${GAMES_BASE_URL}${games[game]['path']}" ${
                     games[game]['aliases'] ? 'aliases="' + games[game]['aliases'].join(',') + '"' : ''
                 }>${game} <span class="star">❤</span> </li>`
             );
