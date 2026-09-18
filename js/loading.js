@@ -38,7 +38,7 @@ fetch('./config.jsonc')
         let gamesList = $('#gamesList');
         for (game in games) {
             gamesList.append(
-                `<li url="${GAMES_BASE_URL}${games[game]['path']}" ${
+                `<li url="${GAMES_BASE_URL}${games[game]['path']}/" ${
                     games[game]['aliases'] ? 'aliases="' + games[game]['aliases'].join(',') + '"' : ''
                 }>${game} <span class="star">❤</span> </li>`
             );
